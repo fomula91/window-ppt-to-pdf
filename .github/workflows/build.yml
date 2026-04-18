@@ -40,6 +40,7 @@ jobs:
         run: pyinstaller --onefile --windowed --name ppt2pdf --clean app.py
 
       - name: Verify build output and generate SHA256SUMS
+        id: build_info
         run: |
           if (-not (Test-Path "dist\ppt2pdf.exe")) {
             Write-Error "dist\ppt2pdf.exe not found"
@@ -53,8 +54,16 @@ jobs:
           "$hash  ppt2pdf.exe" | Out-File -FilePath "dist\SHA256SUMS.txt" -Encoding ascii -NoNewline
           Write-Host "SHA256: $hash"
 
-      - name: Upload artifact (non-release builds)
-        if: startsWith(github.ref, 'refs/tags/v') == false
+          # 아카이브 Release 용 날짜 기반 태그 (KST 기준, run_number 로 충돌 방지).
+          $date = (Get-Date).ToUniversalTime().AddHours(9).ToString("yyyyMMdd-HHmm")
+          $archiveTag = "archive-$date-${{ github.run_number }}"
+          "archive_tag=$archiveTag"        | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "archive_name=Archive $date"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "build_date=$date"               | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Archive tag: $archiveTag"
+
+      # 감사·재현을 위해 모든 빌드의 산출물을 Actions 아티팩트로도 보관.
+      - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: ppt2pdf-windows
@@ -63,7 +72,63 @@ jobs:
             dist/SHA256SUMS.txt
           retention-days: 30
 
-      - name: Create GitHub Release (on tag)
+      # 1) 롤링 "latest" 프리릴리스 — 항상 한 개만 유지, 매 빌드마다 덮어씀.
+      #    Windows 사용자에게 공유할 고정 URL: .../releases/tag/latest
+      - name: Publish rolling "latest" pre-release
+        if: startsWith(github.ref, 'refs/tags/v') == false
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
+        with:
+          tag_name: latest
+          name: "Latest build"
+          prerelease: true
+          make_latest: "false"
+          files: |
+            dist/ppt2pdf.exe
+            dist/SHA256SUMS.txt
+          body: |
+            ## 최신 자동 빌드 (main 브랜치)
+
+            - 빌드 시각 (KST): **${{ steps.build_info.outputs.build_date }}**
+            - 커밋: `${{ github.sha }}`
+            - 실행 로그: [run #${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            과거 빌드는 [아카이브 릴리스](../../releases?q=archive-)에서 다운받을 수 있습니다.
+            안정판은 [버전 태그 릴리스](../../releases?q=v)를 사용하세요.
+
+            ### 무결성 검증 (필수)
+            ```powershell
+            Get-FileHash ppt2pdf.exe -Algorithm SHA256
+            ```
+            값이 `SHA256SUMS.txt` 와 일치해야 합니다.
+
+            **요구사항**: Windows 10 이상, Microsoft PowerPoint 설치 필수.
+
+      # 2) 아카이브 릴리스 — 매 빌드마다 새로운 날짜 태그로 영구 보존.
+      #    태그 형식: archive-YYYYMMDD-HHMM-<run_number>
+      - name: Publish archive release
+        if: startsWith(github.ref, 'refs/tags/v') == false
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
+        with:
+          tag_name: ${{ steps.build_info.outputs.archive_tag }}
+          name: ${{ steps.build_info.outputs.archive_name }}
+          prerelease: true
+          make_latest: "false"
+          files: |
+            dist/ppt2pdf.exe
+            dist/SHA256SUMS.txt
+          body: |
+            ## 아카이브 빌드
+
+            - 빌드 시각 (KST): **${{ steps.build_info.outputs.build_date }}**
+            - 커밋: `${{ github.sha }}`
+            - 실행 로그: [run #${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            과거 시점의 빌드를 보존하기 위한 아카이브입니다.
+            최신 빌드는 [`latest`](../../releases/tag/latest) 를,
+            안정판은 [버전 태그 릴리스](../../releases?q=v)를 사용하세요.
+
+      # 태그 푸시 시 버전 Release를 별도로 발행.
+      - name: Create versioned GitHub Release (on tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
         with:

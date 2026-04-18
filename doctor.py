@@ -89,23 +89,56 @@ def check_system(r: Reporter) -> None:
         r.result(OK, "Windows 플랫폼")
 
 
-def check_package(r: Reporter, name: str, import_name: str | None = None) -> None:
-    mod_name = import_name or name
-    try:
-        mod = __import__(mod_name)
-        version = getattr(mod, "__version__", "unknown")
-        r.result(OK, f"import {name}", f"version {version}")
-    except Exception as e:
-        r.exc(f"import {name}", e)
-
-
 def check_packages(r: Reporter) -> None:
+    """의존 패키지 import 상태 + 버전을 보고.
+
+    중요: 각 `import X` 는 정적 문장으로 적어야 PyInstaller 가 번들에 포함한다.
+    `__import__("X")` 같은 동적 호출은 frozen 실행 파일에 모듈이 빠져
+    healthy 빌드에서도 [FAIL] 로 잘못 보고된다.
+    """
     r.section("Dependencies")
-    check_package(r, "pywin32", "win32com.client")
-    check_package(r, "PyQt6", "PyQt6")
-    check_package(r, "img2pdf")
-    check_package(r, "Pillow", "PIL")
-    check_package(r, "psutil")
+
+    # pywin32
+    try:
+        import pywintypes  # noqa: F401
+        import win32com.client  # noqa: F401
+        version = getattr(pywintypes, "__version__", "unknown")
+        r.result(OK, "import pywin32", f"pywintypes {version}")
+    except Exception as e:
+        r.exc("import pywin32", e)
+
+    # PyQt6 (Qt 버전까지 함께 보고)
+    try:
+        import PyQt6  # noqa: F401
+        from PyQt6.QtCore import QT_VERSION_STR, PYQT_VERSION_STR
+        r.result(
+            OK,
+            "import PyQt6",
+            f"PyQt6 {PYQT_VERSION_STR} / Qt {QT_VERSION_STR}",
+        )
+    except Exception as e:
+        r.exc("import PyQt6", e)
+
+    # img2pdf
+    try:
+        import img2pdf
+        r.result(OK, "import img2pdf", f"version {getattr(img2pdf, '__version__', 'unknown')}")
+    except Exception as e:
+        r.exc("import img2pdf", e)
+
+    # Pillow
+    try:
+        import PIL
+        r.result(OK, "import Pillow", f"version {getattr(PIL, '__version__', 'unknown')}")
+    except Exception as e:
+        r.exc("import Pillow", e)
+
+    # psutil (선택 의존성)
+    try:
+        import psutil
+        r.result(OK, "import psutil", f"version {getattr(psutil, '__version__', 'unknown')}")
+    except Exception as e:
+        r.exc("import psutil", e)
 
 
 def check_appdata(r: Reporter) -> None:

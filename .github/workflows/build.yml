@@ -134,6 +134,11 @@ jobs:
             exit 1
           }
 
+          # 마지막 native 명령(git ls-remote "not found" -> exit 2)이 남겨둔
+          # $LASTEXITCODE 가 pwsh -Command 래퍼를 통해 step 실패로 보고되는 것을
+          # 방지하기 위해 성공 경로에서는 명시적으로 0 으로 종료한다.
+          exit 0
+
       # 1) 롤링 "latest" 프리릴리스 — 항상 한 개만 유지, 매 빌드마다 덮어씀.
       #    Windows 사용자에게 공유할 고정 URL: .../releases/tag/latest
       #    Feature 브랜치·구 커밋에서 수동 실행돼도 공개 릴리스에 영향이 가지

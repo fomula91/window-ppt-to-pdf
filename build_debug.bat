@@ -18,6 +18,7 @@ pyinstaller ^
     --name ppt2pdf_debug ^
     --clean ^
     --debug=noarchive ^
+    --exclude-module pikepdf ^
     app.py
 if errorlevel 1 exit /b 1
 
@@ -26,6 +27,7 @@ pyinstaller ^
     --console ^
     --name doctor ^
     --clean ^
+    --exclude-module pikepdf ^
     doctor.py
 if errorlevel 1 exit /b 1
 

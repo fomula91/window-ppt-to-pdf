@@ -227,26 +227,15 @@ def check_img2pdf_smoke(r: Reporter) -> None:
         r.exc("img2pdf 변환 실패", e)
 
 
-def _pause_if_double_clicked() -> None:
-    """Explorer 더블클릭으로 실행된 경우에만 창이 즉시 닫히지 않게 대기.
-
-    기존 cmd.exe / PowerShell 세션에서 실행한 경우에는 대기하지 않는다.
-    판별 기준: GetConsoleProcessList 가 이 프로세스 단 하나만 반환하면
-    이 콘솔 창을 이 프로세스가 단독 소유한 것 → 종료하는 순간 창이 사라지는
-    더블클릭 상황이라고 판단.
-    """
-    if sys.platform != "win32":
-        return
+def _wait_for_enter() -> None:
+    """결과를 사용자가 읽을 수 있도록 Enter 대기. 리디렉션된 환경은 건너뜀."""
+    # stdin 이 pipe 로 연결된 경우(자동화·CI)는 input() 이 즉시 EOF 로 끝나므로
+    # 아무 효과가 없다. isatty 로 사람이 보는 터미널인지 확인한다.
     try:
-        import ctypes
-
-        kernel32 = ctypes.windll.kernel32
-        buf = (ctypes.c_uint * 2)()
-        count = kernel32.GetConsoleProcessList(buf, 2)
-        if count != 1:
-            return  # 이미 열려 있던 셸에 붙어 실행 → 즉시 종료
+        if not sys.stdin.isatty():
+            return
     except Exception:
-        return
+        pass
     print()
     print("Enter 키를 누르면 창이 닫힙니다.")
     try:
@@ -256,6 +245,9 @@ def _pause_if_double_clicked() -> None:
 
 
 def main() -> int:
+    # --no-pause: CI / 자동화 호출시 Enter 대기 없이 즉시 종료.
+    no_pause = "--no-pause" in sys.argv
+
     r = Reporter()
     r.line("ppt2pdf doctor — 환경 진단 리포트")
     r.line(f"생성 시각: {datetime.now().isoformat(timespec='seconds')}")
@@ -281,7 +273,10 @@ def main() -> int:
     r.line("")
     r.line(f"리포트 저장: {REPORT_PATH}")
 
-    _pause_if_double_clicked()
+    # 사용자가 결과를 읽을 수 있도록 기본적으로 Enter 를 기다린다.
+    # 자동화에서는 `doctor.exe --no-pause` 로 호출하면 즉시 종료.
+    if not no_pause:
+        _wait_for_enter()
     return 0 if r.fail_count == 0 else 1
 
 

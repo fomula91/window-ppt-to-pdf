@@ -3,8 +3,12 @@
 #   2) 더 강한 공급망 방어가 필요하면 pip-compile --generate-hashes 로
 #      requirements.lock 을 생성하고 CI 에서 `pip install --require-hashes` 사용
 # psutil 은 converter.py 의 잔류 PowerPoint 프로세스 정리 폴백에 사용 (선택).
+# img2pdf 는 0.6.x 부터 pikepdf 를 필수 의존성으로 요구하는데, pikepdf 는
+# 네이티브 QPDF 라이브러리를 번들해 PyInstaller 단일 exe 에 넣었을 때 DLL
+# 의존성 해결 실패로 access violation 을 일으킨다. 0.5.1 은 외부 의존성이
+# 없는 순수 파이썬 구현이라 exe 패키징에 훨씬 안정적이다.
 pywin32==310
 PyQt6==6.8.0
-img2pdf==0.6.0
+img2pdf==0.5.1
 Pillow==11.1.0
 psutil==6.1.1

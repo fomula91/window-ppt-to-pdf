@@ -37,10 +37,19 @@ jobs:
           pip install pyinstaller
 
       - name: Build ppt2pdf.exe (GUI)
-        run: pyinstaller --onefile --windowed --name ppt2pdf --clean app.py
+        # --exclude-module pikepdf: img2pdf 가 선택적으로 try-import 하는
+        # pikepdf 는 네이티브 QPDF DLL 번들 이슈로 exe 에서 access violation
+        # 을 일으키므로 애초에 번들하지 않는다. img2pdf 0.5.1 은 없어도 동작.
+        run: >-
+          pyinstaller --onefile --windowed --name ppt2pdf --clean
+          --exclude-module pikepdf
+          app.py
 
       - name: Build doctor.exe (diagnostics)
-        run: pyinstaller --onefile --console --name doctor --clean doctor.py
+        run: >-
+          pyinstaller --onefile --console --name doctor --clean
+          --exclude-module pikepdf
+          doctor.py
 
       - name: Verify build output and generate SHA256SUMS
         id: build_info

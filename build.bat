@@ -12,11 +12,14 @@ if errorlevel 1 (
 )
 
 REM 메인 GUI 앱 (창 없음, 콘솔 숨김)
+REM --exclude-module pikepdf: img2pdf 가 선택적으로 import 하는 pikepdf 는
+REM 네이티브 QPDF DLL 이슈로 exe 에서 access violation 을 일으킨다.
 pyinstaller ^
     --onefile ^
     --windowed ^
     --name ppt2pdf ^
     --clean ^
+    --exclude-module pikepdf ^
     app.py
 if errorlevel 1 exit /b 1
 
@@ -26,6 +29,7 @@ pyinstaller ^
     --console ^
     --name doctor ^
     --clean ^
+    --exclude-module pikepdf ^
     doctor.py
 if errorlevel 1 exit /b 1
 

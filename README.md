@@ -8,14 +8,18 @@ img2pdf로 무손실 결합해 PDF를 만든다. 이 방식 덕분에 **글씨·
 ## 빠른 시작 (Windows 사용자용 — Python 불필요)
 
 1. 이 저장소의 [**Releases**](../../releases/latest) 페이지로 이동
-2. 최신 릴리스의 **`ppt2pdf.exe`** 다운로드
-3. 더블클릭하여 실행 → PPT 파일을 드래그앤드롭 → **변환 시작**
+2. 최신 릴리스에서 **`ppt2pdf.exe`** 와 **`SHA256SUMS.txt`** 둘 다 다운로드
+3. **무결성 검증** — PowerShell에서 아래 명령으로 해시가 일치하는지 확인한다. 일치하지 않으면 **절대 실행하지 말고** 새로 내려받는다.
+   ```powershell
+   Get-FileHash ppt2pdf.exe -Algorithm SHA256
+   # 출력된 Hash 값이 SHA256SUMS.txt 의 값과 정확히 일치해야 함
+   ```
+4. 더블클릭하여 실행 → PPT 파일을 드래그앤드롭 → **변환 시작**
 
-> **Windows SmartScreen 경고가 뜨는 경우**
-> 서명되지 않은 exe라 "Windows에서 PC를 보호했습니다" 안내가 표시될 수 있다.
-> **추가 정보 → 실행** 을 클릭하면 정상 실행된다.
+> **Windows SmartScreen 경고**
+> 이 exe는 코드서명 인증서로 서명되어 있지 않아 "Windows에서 PC를 보호했습니다" 경고가 표시될 수 있다. **실행 여부는 3단계의 해시 검증을 통과한 경우에만** 결정한다. 해시가 일치하면 "추가 정보 → 실행"으로 진행할 수 있다. 해시가 다르면 공격자에 의해 변조됐을 가능성이 있으므로 삭제한다.
 
-> **PowerPoint는 반드시 설치되어 있어야 한다.** 슬라이드 렌더링을 실제 PowerPoint에 위임하기 때문에, 설치된 폰트가 그대로 사용되어 글씨 깨짐이 발생하지 않는다.
+> **PowerPoint는 반드시 설치되어 있어야 한다.** 슬라이드 렌더링을 실제 PowerPoint에 위임하기 때문에 설치된 폰트가 그대로 사용되어 글씨 깨짐이 발생하지 않는다. 참고로 이 앱은 열어본 PPT 파일의 **VBA 매크로 / ActiveX / 외부 링크 자동 실행을 강제로 차단**(`AutomationSecurity = ForceDisable`)하고, 확장자 + 파일 시그니처(매직 바이트)를 검사해 위조 파일을 거부한다.
 
 ## 필요 환경
 
@@ -94,3 +98,19 @@ build.bat
 - **한글 경로에서 실패**: 거의 없으나, 문제 시 영문 경로로 옮겨 재시도.
 - **변환 중 PowerPoint 창이 잠깐 뜸**: COM 제약으로 완전한 hidden이 불가능한
   버전이 있다. 변환은 정상 진행된다.
+- **"허용되지 않는 확장자" / "파일 시그니처가 … 아닙니다"**: 입력 파일이
+  `.ppt/.pptx/.pps/.ppsx/.pptm/.ppsm` 중 하나여야 하며, 내부 헤더도
+  정상이어야 한다(보안 검증). 파일이 손상됐거나 확장자만 바꾼 경우 재발급받는다.
+
+## 보안 정책
+
+- **매크로 자동 실행 차단**: PowerPoint를 열 때 `AutomationSecurity=3`
+  (msoAutomationSecurityForceDisable) 을 설정해 VBA 매크로·ActiveX·외부 링크의
+  자동 실행을 막는다.
+- **파일 검증**: 확장자 화이트리스트 + 매직 바이트(ZIP / OLE CFB) 검사.
+- **공급망**: `requirements.txt` 는 정확한 버전으로 핀 고정, GitHub Actions
+  서드파티 액션은 전체 커밋 SHA 로 핀 고정 (`.github/workflows/build.yml`).
+- **배포 무결성**: 모든 Release 에 `SHA256SUMS.txt` 를 함께 발행한다.
+  사용자는 이 해시로 다운로드 파일의 변조 여부를 검증할 수 있다.
+- **로그 보호**: 변환 실패 시 전체 스택트레이스는 UI 에 노출하지 않고
+  `%APPDATA%\ppt2pdf\error.log` 에만 기록된다. "로그 보기" 버튼으로 열람.

@@ -1,4 +1,10 @@
-pywin32>=306
-PyQt6>=6.6
-img2pdf>=0.5.1
-Pillow>=10.2
+# 의존성은 `==` 로 정확히 고정. 업그레이드 시에는 아래 절차를 따를 것:
+#   1) 새 버전 번호로 수정 후 pip install -r requirements.txt 로 빌드 검증
+#   2) 더 강한 공급망 방어가 필요하면 pip-compile --generate-hashes 로
+#      requirements.lock 을 생성하고 CI 에서 `pip install --require-hashes` 사용
+# psutil 은 converter.py 의 잔류 PowerPoint 프로세스 정리 폴백에 사용 (선택).
+pywin32==310
+PyQt6==6.8.0
+img2pdf==0.6.0
+Pillow==11.1.0
+psutil==6.1.1

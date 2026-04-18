@@ -1,17 +1,24 @@
-"""PyQt6 기반 PPT → PDF 변환 GUI.
+"""PyQt6 기반 PPT -> PDF 변환 GUI.
 
 - 드래그앤드롭 / 파일 선택
 - 1280 가로 고정 해상도 (옵션 없음)
 - JPEG 재압축 체크박스
 - QThread로 변환 분리, 진행률 바
 - 완료 후 최종 용량 표시 및 폴더 열기
+
+보안 메모:
+    - 예외 trackback은 UI에 노출하지 않고 %APPDATA%\\ppt2pdf\\error.log 로 기록.
+      사용자는 "로그 보기" 버튼으로만 전체 내용을 확인.
+    - 출력 PDF가 이미 존재하면 덮어쓰기 전에 반드시 확인을 받는다.
 """
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
 import traceback
+from logging.handlers import RotatingFileHandler
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
@@ -30,6 +37,46 @@ from PyQt6.QtWidgets import (
 )
 
 from converter import convert_ppt_to_pdf
+
+
+def _log_dir() -> str:
+    """플랫폼별 로그 디렉터리 (Windows: %APPDATA%\\ppt2pdf, 기타: ~/.ppt2pdf)."""
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "ppt2pdf")
+    return os.path.join(os.path.expanduser("~"), ".ppt2pdf")
+
+
+LOG_PATH = os.path.join(_log_dir(), "error.log")
+
+
+def _init_logger() -> logging.Logger:
+    os.makedirs(_log_dir(), exist_ok=True)
+    logger = logging.getLogger("ppt2pdf")
+    if logger.handlers:
+        return logger
+    logger.setLevel(logging.INFO)
+    handler = RotatingFileHandler(
+        LOG_PATH, maxBytes=512 * 1024, backupCount=2, encoding="utf-8"
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    )
+    logger.addHandler(handler)
+    return logger
+
+
+_LOG = _init_logger()
+
+
+def _summarize_error(exc: BaseException) -> str:
+    """사용자에게 보일 한 줄 요약. 내부 경로/스택은 노출하지 않는다."""
+    name = type(exc).__name__
+    msg = str(exc).strip() or "(메시지 없음)"
+    # 메시지 자체에 경로가 섞이는 경우가 있어 160자로 제한.
+    if len(msg) > 160:
+        msg = msg[:157] + "..."
+    return f"{name}: {msg}"
 
 
 class ConvertWorker(QThread):
@@ -53,7 +100,8 @@ class ConvertWorker(QThread):
             )
             self.finished_ok.emit(self._pdf, size)
         except Exception as e:
-            self.failed.emit(f"{e}\n\n{traceback.format_exc()}")
+            _LOG.error("변환 실패: %s", traceback.format_exc())
+            self.failed.emit(_summarize_error(e))
 
 
 class DropLineEdit(QLineEdit):
@@ -84,7 +132,7 @@ class DropLineEdit(QLineEdit):
 class MainWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("PPT → PDF 변환기 (1280×720, 폰트 보존)")
+        self.setWindowTitle("PPT -> PDF 변환기 (1280x720, 폰트 보존)")
         self.resize(560, 260)
         self._worker: ConvertWorker | None = None
         self._last_pdf: str | None = None
@@ -116,7 +164,7 @@ class MainWindow(QWidget):
         layout.addWidget(self.jpeg_chk)
 
         info = QLabel(
-            "슬라이드 이미지는 가로 1280px 고정입니다 (16:9 → 720, 4:3 → 960)."
+            "슬라이드 이미지는 가로 1280px 고정입니다 (16:9 -> 720, 4:3 -> 960)."
         )
         info.setStyleSheet("color: #666;")
         layout.addWidget(info)
@@ -134,8 +182,11 @@ class MainWindow(QWidget):
         self.btn_open = QPushButton("폴더 열기")
         self.btn_open.setEnabled(False)
         self.btn_open.clicked.connect(self._open_folder)
+        self.btn_log = QPushButton("로그 보기")
+        self.btn_log.clicked.connect(self._open_log)
         row3.addWidget(self.btn_convert)
         row3.addWidget(self.btn_open)
+        row3.addWidget(self.btn_log)
         layout.addLayout(row3)
 
     def _pick_ppt(self) -> None:
@@ -163,6 +214,17 @@ class MainWindow(QWidget):
         pdf = self.pdf_edit.text().strip()
         if not pdf:
             pdf = os.path.splitext(ppt)[0] + ".pdf"
+
+        if os.path.exists(pdf):
+            reply = QMessageBox.question(
+                self,
+                "덮어쓰기 확인",
+                f"이미 존재하는 파일입니다:\n{pdf}\n\n덮어쓸까요?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
 
         self.btn_convert.setEnabled(False)
         self.btn_open.setEnabled(False)
@@ -195,25 +257,35 @@ class MainWindow(QWidget):
                 "'용량 최소화' 옵션을 켜고 다시 변환하면 더 작아집니다.",
             )
 
-    def _on_failed(self, msg: str) -> None:
+    def _on_failed(self, summary: str) -> None:
         self.btn_convert.setEnabled(True)
         self.status.setText("실패")
         QMessageBox.critical(
             self,
             "변환 실패",
-            "PowerPoint 미설치이거나 파일이 손상되었을 수 있습니다.\n\n" + msg,
+            f"{summary}\n\n자세한 내용은 '로그 보기'를 확인하세요.",
         )
 
     def _open_folder(self) -> None:
         if not self._last_pdf:
             return
         folder = os.path.dirname(os.path.abspath(self._last_pdf))
+        self._open_path(folder)
+
+    def _open_log(self) -> None:
+        if not os.path.isfile(LOG_PATH):
+            QMessageBox.information(self, "로그", "아직 기록된 로그가 없습니다.")
+            return
+        self._open_path(LOG_PATH)
+
+    @staticmethod
+    def _open_path(path: str) -> None:
         if sys.platform == "win32":
-            subprocess.Popen(["explorer", folder])
+            os.startfile(path)  # type: ignore[attr-defined]
         elif sys.platform == "darwin":
-            subprocess.Popen(["open", folder])
+            subprocess.Popen(["open", path])
         else:
-            subprocess.Popen(["xdg-open", folder])
+            subprocess.Popen(["xdg-open", path])
 
 
 def main() -> int:

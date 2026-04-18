@@ -1,8 +1,15 @@
-"""PPT → PNG(1280 가로 고정) → PDF 변환 로직.
+"""PPT -> PNG(1280 가로 고정) -> PDF 변환 로직.
 
 Windows에 설치된 PowerPoint를 COM으로 호출해 슬라이드를 PNG로 내보낸 뒤
 img2pdf로 결합한다. 폰트는 사용자 PC에 존재하는 그대로 렌더링되므로
 변환된 PDF에서 글꼴이 치환·깨질 일이 없다.
+
+보안 메모:
+    - VBA 매크로·ActiveX 자동 실행을 막기 위해
+      `Application.AutomationSecurity = msoAutomationSecurityForceDisable (3)` 설정.
+    - 확장자 + 파일 시그니처(매직 바이트) 양쪽 검증으로 엉뚱한 파일이 PowerPoint
+      파서에 전달되지 않게 한다.
+    - 변환 실패 시 잔류한 POWERPNT.EXE를 선택적으로 정리한다(psutil 있을 때).
 """
 from __future__ import annotations
 
@@ -14,10 +21,59 @@ from typing import Callable, Optional
 
 TARGET_WIDTH = 1280
 
+ALLOWED_EXTS = (".ppt", ".pptx", ".pps", ".ppsx", ".pptm", ".ppsm")
+
+# PPTX/PPSX/PPTM/PPSM 은 ZIP 기반 OOXML, PPT/PPS 는 OLE CFB.
+_ZIP_MAGIC = b"PK\x03\x04"
+_OLE_MAGIC = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
+
+# msoAutomationSecurity enum
+_AUTOMATION_SECURITY_FORCE_DISABLE = 3
+
 
 def _ensure_windows() -> None:
     if sys.platform != "win32":
         raise RuntimeError("이 프로그램은 Windows + PowerPoint 환경에서만 동작합니다.")
+
+
+def _validate_input(ppt_abs: str) -> None:
+    """확장자 화이트리스트 + 매직 바이트 검증."""
+    if not os.path.isfile(ppt_abs):
+        raise FileNotFoundError(f"PPT 파일을 찾을 수 없습니다: {ppt_abs}")
+
+    ext = os.path.splitext(ppt_abs)[1].lower()
+    if ext not in ALLOWED_EXTS:
+        raise ValueError(
+            f"허용되지 않는 확장자입니다: {ext or '(없음)'}. "
+            f"허용: {', '.join(ALLOWED_EXTS)}"
+        )
+
+    with open(ppt_abs, "rb") as f:
+        head = f.read(8)
+    if ext in (".pptx", ".ppsx", ".pptm", ".ppsm"):
+        if not head.startswith(_ZIP_MAGIC):
+            raise ValueError(
+                "파일 시그니처가 OOXML(ZIP)이 아닙니다. 손상되었거나 위조된 파일일 수 있습니다."
+            )
+    else:  # .ppt, .pps
+        if not head.startswith(_OLE_MAGIC):
+            raise ValueError(
+                "파일 시그니처가 OLE CFB가 아닙니다. 손상되었거나 위조된 파일일 수 있습니다."
+            )
+
+
+def _kill_stale_powerpoint() -> None:
+    """Close/Quit 실패 후 잔류한 POWERPNT.EXE 를 최후의 수단으로 정리."""
+    try:
+        import psutil  # type: ignore
+    except ImportError:
+        return
+    for proc in psutil.process_iter(attrs=["name"]):
+        try:
+            if (proc.info.get("name") or "").lower() == "powerpnt.exe":
+                proc.kill()
+        except Exception:
+            pass
 
 
 def convert_ppt_to_pdf(
@@ -40,14 +96,23 @@ def convert_ppt_to_pdf(
 
     ppt_abs = os.path.abspath(ppt_path)
     pdf_abs = os.path.abspath(pdf_path)
-    if not os.path.isfile(ppt_abs):
-        raise FileNotFoundError(f"PPT 파일을 찾을 수 없습니다: {ppt_abs}")
+    _validate_input(ppt_abs)
 
     pythoncom.CoInitialize()
     powerpoint = None
     presentation = None
+    clean_exit = False
     try:
         powerpoint = win32com.client.Dispatch("PowerPoint.Application")
+        # VBA 매크로 / ActiveX / 외부 링크 자동 실행 차단.
+        try:
+            powerpoint.AutomationSecurity = _AUTOMATION_SECURITY_FORCE_DISABLE
+        except Exception:
+            pass
+        try:
+            powerpoint.DisplayAlerts = 0  # ppAlertsNone
+        except Exception:
+            pass
         try:
             powerpoint.Visible = 1
         except Exception:
@@ -90,18 +155,22 @@ def convert_ppt_to_pdf(
             with open(pdf_abs, "wb") as f:
                 f.write(img2pdf.convert(img_paths))
 
+        clean_exit = True
         return os.path.getsize(pdf_abs)
     finally:
+        closed_ok = True
         try:
             if presentation is not None:
                 presentation.Close()
         except Exception:
-            pass
+            closed_ok = False
         try:
             if powerpoint is not None:
                 powerpoint.Quit()
         except Exception:
-            pass
+            closed_ok = False
+        if not closed_ok or not clean_exit:
+            _kill_stale_powerpoint()
         try:
             pythoncom.CoUninitialize()
         except Exception:
@@ -109,7 +178,7 @@ def convert_ppt_to_pdf(
 
 
 def _cli() -> int:
-    p = argparse.ArgumentParser(description="PPT → 이미지 기반 PDF 변환기")
+    p = argparse.ArgumentParser(description="PPT -> 이미지 기반 PDF 변환기")
     p.add_argument("input", help="입력 .ppt 또는 .pptx 경로")
     p.add_argument(
         "output",

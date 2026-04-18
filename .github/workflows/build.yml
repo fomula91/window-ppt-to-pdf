@@ -36,23 +36,32 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build exe with PyInstaller
+      - name: Build ppt2pdf.exe (GUI)
         run: pyinstaller --onefile --windowed --name ppt2pdf --clean app.py
+
+      - name: Build doctor.exe (diagnostics)
+        run: pyinstaller --onefile --console --name doctor --clean doctor.py
 
       - name: Verify build output and generate SHA256SUMS
         id: build_info
         run: |
-          if (-not (Test-Path "dist\ppt2pdf.exe")) {
-            Write-Error "dist\ppt2pdf.exe not found"
-            exit 1
+          foreach ($f in @("dist\ppt2pdf.exe", "dist\doctor.exe")) {
+            if (-not (Test-Path $f)) {
+              Write-Error "$f not found"
+              exit 1
+            }
+            $size = (Get-Item $f).Length / 1MB
+            Write-Host ("Built {0} ({1:N2} MB)" -f $f, $size)
           }
-          $size = (Get-Item "dist\ppt2pdf.exe").Length / 1MB
-          Write-Host ("Built ppt2pdf.exe ({0:N2} MB)" -f $size)
 
-          # Release/아티팩트 무결성 검증용 해시 파일 생성.
-          $hash = (Get-FileHash "dist\ppt2pdf.exe" -Algorithm SHA256).Hash.ToLower()
-          "$hash  ppt2pdf.exe" | Out-File -FilePath "dist\SHA256SUMS.txt" -Encoding ascii -NoNewline
-          Write-Host "SHA256: $hash"
+          # Release/아티팩트 무결성 검증용 해시 파일 (두 exe 모두 포함).
+          $lines = @()
+          foreach ($f in @("ppt2pdf.exe", "doctor.exe")) {
+            $hash = (Get-FileHash "dist\$f" -Algorithm SHA256).Hash.ToLower()
+            $lines += "$hash  $f"
+            Write-Host "SHA256 $f = $hash"
+          }
+          ($lines -join "`n") | Out-File -FilePath "dist\SHA256SUMS.txt" -Encoding ascii -NoNewline
 
           # 아카이브 Release 용 날짜 기반 태그 (KST 기준, run_number 로 충돌 방지).
           $date = (Get-Date).ToUniversalTime().AddHours(9).ToString("yyyyMMdd-HHmm")
@@ -69,8 +78,10 @@ jobs:
           name: ppt2pdf-windows
           path: |
             dist/ppt2pdf.exe
+            dist/doctor.exe
             dist/SHA256SUMS.txt
           retention-days: 30
+          if-no-files-found: error
 
       # 기존 `latest` 릴리스+태그를 먼저 제거한다. softprops/action-gh-release 는
       # 같은 tag_name 의 릴리스가 있으면 내용만 업데이트할 뿐 Git 태그를 현재
@@ -130,6 +141,7 @@ jobs:
           make_latest: "false"
           files: |
             dist/ppt2pdf.exe
+            dist/doctor.exe
             dist/SHA256SUMS.txt
           body: |
             ## 최신 자동 빌드 (main 브랜치)
@@ -162,6 +174,7 @@ jobs:
           make_latest: "false"
           files: |
             dist/ppt2pdf.exe
+            dist/doctor.exe
             dist/SHA256SUMS.txt
           body: |
             ## 아카이브 빌드
@@ -181,6 +194,7 @@ jobs:
         with:
           files: |
             dist/ppt2pdf.exe
+            dist/doctor.exe
             dist/SHA256SUMS.txt
           generate_release_notes: true
           body: |

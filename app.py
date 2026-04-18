@@ -10,9 +10,17 @@
     - 예외 trackback은 UI에 노출하지 않고 %APPDATA%\\ppt2pdf\\error.log 로 기록.
       사용자는 "로그 보기" 버튼으로만 전체 내용을 확인.
     - 출력 PDF가 이미 존재하면 덮어쓰기 전에 반드시 확인을 받는다.
+
+디버깅:
+    - GUI 가 뜨기도 전에 죽는 startup 크래시는 %APPDATA%\\ppt2pdf\\startup_crash.log
+      에 기록된다 (import·QApplication 생성 포함 전역 try 로 감쌌다).
+    - 콘솔을 보고 싶으면 `build_debug.bat` 로 `--console` 모드 exe 를 빌드해
+      cmd.exe 에서 실행하면 stderr 가 그대로 출력된다.
+    - 네이티브 크래시(세그폴트 류)는 faulthandler 가 stderr 및 로그에 남긴다.
 """
 from __future__ import annotations
 
+import faulthandler
 import logging
 import os
 import subprocess
@@ -20,9 +28,57 @@ import sys
 import traceback
 from logging.handlers import RotatingFileHandler
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent
-from PyQt6.QtWidgets import (
+
+def _log_dir() -> str:
+    """플랫폼별 로그 디렉터리 (Windows: %APPDATA%\\ppt2pdf, 기타: ~/.ppt2pdf)."""
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "ppt2pdf")
+    return os.path.join(os.path.expanduser("~"), ".ppt2pdf")
+
+
+LOG_PATH = os.path.join(_log_dir(), "error.log")
+STARTUP_CRASH_LOG = os.path.join(_log_dir(), "startup_crash.log")
+
+# faulthandler 에 넘긴 파일은 프로세스 전 생애 동안 열려 있어야 네이티브
+# 크래시가 기록되므로, GC 로 닫히지 않게 모듈 전역에서 참조를 유지한다.
+_CRASH_FH = None
+
+
+def _install_crash_logging() -> None:
+    """PyQt6 / converter import 전에 먼저 호출해야 import 실패도 기록된다."""
+    global _CRASH_FH
+    try:
+        os.makedirs(_log_dir(), exist_ok=True)
+    except Exception:
+        pass
+
+    try:
+        _CRASH_FH = open(STARTUP_CRASH_LOG, "a", encoding="utf-8", buffering=1)
+        _CRASH_FH.write("\n===== fault handler armed =====\n")
+        faulthandler.enable(file=_CRASH_FH)
+    except Exception:
+        _CRASH_FH = None
+
+    def _hook(exc_type, exc, tb):
+        try:
+            with open(STARTUP_CRASH_LOG, "a", encoding="utf-8") as f:
+                f.write("\n===== uncaught exception =====\n")
+                traceback.print_exception(exc_type, exc, tb, file=f)
+        except Exception:
+            pass
+        sys.__excepthook__(exc_type, exc, tb)
+
+    sys.excepthook = _hook
+
+
+# PyQt6 / converter import 자체가 실패하는 "GUI 가 아예 안 뜨는" 시나리오도
+# 잡기 위해 가장 먼저 크래시 로깅을 설치한다.
+_install_crash_logging()
+
+from PyQt6.QtCore import Qt, QThread, pyqtSignal  # noqa: E402
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent  # noqa: E402
+from PyQt6.QtWidgets import (  # noqa: E402
     QApplication,
     QCheckBox,
     QFileDialog,
@@ -36,18 +92,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from converter import convert_ppt_to_pdf
-
-
-def _log_dir() -> str:
-    """플랫폼별 로그 디렉터리 (Windows: %APPDATA%\\ppt2pdf, 기타: ~/.ppt2pdf)."""
-    if sys.platform == "win32":
-        base = os.environ.get("APPDATA") or os.path.expanduser("~")
-        return os.path.join(base, "ppt2pdf")
-    return os.path.join(os.path.expanduser("~"), ".ppt2pdf")
-
-
-LOG_PATH = os.path.join(_log_dir(), "error.log")
+from converter import convert_ppt_to_pdf  # noqa: E402
 
 
 def _init_logger() -> logging.Logger:
@@ -289,10 +334,20 @@ class MainWindow(QWidget):
 
 
 def main() -> int:
-    app = QApplication(sys.argv)
-    w = MainWindow()
-    w.show()
-    return app.exec()
+    try:
+        app = QApplication(sys.argv)
+        w = MainWindow()
+        w.show()
+        return app.exec()
+    except BaseException:
+        # 여기까지 왔으면 QApplication/MainWindow 생성 전후에서 치명적 오류.
+        try:
+            with open(STARTUP_CRASH_LOG, "a", encoding="utf-8") as f:
+                f.write("\n===== main() crash =====\n")
+                traceback.print_exc(file=f)
+        except Exception:
+            pass
+        raise
 
 
 if __name__ == "__main__":

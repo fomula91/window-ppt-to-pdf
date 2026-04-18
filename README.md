@@ -8,7 +8,7 @@ img2pdf로 무손실 결합해 PDF를 만든다. 이 방식 덕분에 **글씨·
 ## 빠른 시작 (Windows 사용자용 — Python 불필요)
 
 1. 이 저장소의 [**Releases**](../../releases/latest) 페이지로 이동
-2. 최신 릴리스에서 **`ppt2pdf.exe`** 와 **`SHA256SUMS.txt`** 둘 다 다운로드
+2. 최신 릴리스에서 **`ppt2pdf.exe`**, **`doctor.exe`**, **`SHA256SUMS.txt`** 를 모두 다운로드 (doctor 는 문제 발생 시 진단용)
 3. **무결성 검증** — PowerShell에서 아래 명령으로 해시가 일치하는지 확인한다. 일치하지 않으면 **절대 실행하지 말고** 새로 내려받는다.
    ```powershell
    Get-FileHash ppt2pdf.exe -Algorithm SHA256
@@ -90,6 +90,28 @@ build.bat
 ```
 
 결과: `dist\ppt2pdf.exe` (단일 실행 파일)
+
+## 디버깅 (크래시 원인 파악)
+
+앱이 조용히 죽거나 창이 안 뜨면 아래 순서로 확인합니다.
+
+1. **`doctor.exe` 실행 — 가장 먼저 권장**
+   - Releases 페이지에서 `doctor.exe` 를 내려받아 더블클릭(또는 cmd 에서 실행).
+   - Python / 의존 패키지 / PowerPoint COM / AppData 쓰기 권한 / img2pdf 최소 변환을 자동 점검.
+   - 결과는 콘솔에 출력되는 동시에 `%APPDATA%\ppt2pdf\doctor_report.txt` 로 저장됨. 이 파일을 공유해 주면 원인 파악이 쉬움.
+2. **로그 파일 확인** (GUI 가 한 번이라도 떴던 경우)
+   - `%APPDATA%\ppt2pdf\error.log` — 변환 중 발생한 예외 전체 스택트레이스
+   - `%APPDATA%\ppt2pdf\startup_crash.log` — GUI 초기화 전 죽은 경우의 예외 / 네이티브 크래시(faulthandler)
+3. **콘솔(디버그) 빌드로 직접 실행**
+   ```bat
+   pip install pyinstaller
+   build_debug.bat
+   cmd.exe
+   dist\ppt2pdf_debug.exe
+   ```
+   `--console` 모드라 traceback 이 cmd 창에 그대로 출력됩니다.
+4. **Windows 이벤트 뷰어** — `eventvwr` 실행 → **Windows 로그 → Application** 에서 "Application Error" / "Windows Error Reporting" 항목에 `ppt2pdf.exe` 의 폴트 모듈·오프셋이 기록됨. 네이티브 DLL 충돌 원인 단서.
+5. **원격지에서 로그 받기**: 위 로그파일들을 압축해서 보내달라고 요청하면 대부분 원인 식별 가능.
 
 ## 문제 해결
 

@@ -103,7 +103,10 @@ def convert_ppt_to_pdf(
     presentation = None
     clean_exit = False
     try:
-        powerpoint = win32com.client.Dispatch("PowerPoint.Application")
+        # DispatchEx: 사용자가 이미 열어둔 PowerPoint 세션에 붙지 않도록
+        # 격리된 새 인스턴스로 작업한다. Dispatch 를 쓰면 아래 Quit() 가
+        # 사용자의 PowerPoint 창(저장 안 된 발표자료 포함)을 통째로 닫을 위험.
+        powerpoint = win32com.client.DispatchEx("PowerPoint.Application")
         # VBA 매크로 / ActiveX / 외부 링크 자동 실행 차단.
         try:
             powerpoint.AutomationSecurity = _AUTOMATION_SECURITY_FORCE_DISABLE

@@ -72,10 +72,56 @@ jobs:
             dist/SHA256SUMS.txt
           retention-days: 30
 
+      # 기존 `latest` 릴리스+태그를 먼저 제거한다. softprops/action-gh-release 는
+      # 같은 tag_name 의 릴리스가 있으면 내용만 업데이트할 뿐 Git 태그를 현재
+      # 커밋으로 재지정하지 않기 때문에, 그대로 두면 태그가 옛 커밋을 가리키고
+      # GitHub 이 자동 생성하는 소스 zip/tarball 도 구 코드가 된다.
+      #
+      # "릴리스 없음"은 정상(처음 빌드)으로 넘어가지만, API 오류·권한 오류 등
+      # 기타 실패는 명시적으로 실패시켜 태그가 구 커밋을 가리키는 상태를 숨기지
+      # 않도록 한다.
+      - name: Remove stale "latest" release and tag
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # 1) 릴리스가 존재하면 삭제(실패 시 step 실패).
+          gh release view latest 1>$null 2>$null
+          $releaseExists = ($LASTEXITCODE -eq 0)
+
+          if ($releaseExists) {
+            gh release delete latest --cleanup-tag --yes
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "Failed to delete existing 'latest' release (exit $LASTEXITCODE)."
+              exit 1
+            }
+            Write-Host "Deleted stale 'latest' release and tag."
+          } else {
+            Write-Host "No existing 'latest' release."
+          }
+
+          # 2) 릴리스는 없고 태그만 남은 희귀 상황 대비.
+          git ls-remote --exit-code --tags origin refs/tags/latest 1>$null 2>$null
+          $tagExists = ($LASTEXITCODE -eq 0)
+
+          if ($tagExists) {
+            git push origin :refs/tags/latest
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "Failed to delete stale 'latest' tag (exit $LASTEXITCODE)."
+              exit 1
+            }
+            Write-Host "Deleted stale 'latest' tag."
+          }
+
       # 1) 롤링 "latest" 프리릴리스 — 항상 한 개만 유지, 매 빌드마다 덮어씀.
       #    Windows 사용자에게 공유할 고정 URL: .../releases/tag/latest
+      #    Feature 브랜치·구 커밋에서 수동 실행돼도 공개 릴리스에 영향이 가지
+      #    않도록 main 브랜치에서만 발행.
       - name: Publish rolling "latest" pre-release
-        if: startsWith(github.ref, 'refs/tags/v') == false
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
         with:
           tag_name: latest
@@ -105,8 +151,9 @@ jobs:
 
       # 2) 아카이브 릴리스 — 매 빌드마다 새로운 날짜 태그로 영구 보존.
       #    태그 형식: archive-YYYYMMDD-HHMM-<run_number>
+      #    latest 와 마찬가지로 main 브랜치 빌드만 아카이브.
       - name: Publish archive release
-        if: startsWith(github.ref, 'refs/tags/v') == false
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
         with:
           tag_name: ${{ steps.build_info.outputs.archive_tag }}

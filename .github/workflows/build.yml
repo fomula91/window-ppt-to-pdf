@@ -1,0 +1,65 @@
+name: Build Windows exe
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build exe with PyInstaller
+        run: pyinstaller --onefile --windowed --name ppt2pdf --clean app.py
+
+      - name: Verify build output
+        run: |
+          if (-not (Test-Path "dist\ppt2pdf.exe")) {
+            Write-Error "dist\ppt2pdf.exe not found"
+            exit 1
+          }
+          $size = (Get-Item "dist\ppt2pdf.exe").Length / 1MB
+          Write-Host ("Built ppt2pdf.exe ({0:N2} MB)" -f $size)
+
+      - name: Upload artifact (non-release builds)
+        if: startsWith(github.ref, 'refs/tags/v') == false
+        uses: actions/upload-artifact@v4
+        with:
+          name: ppt2pdf-windows
+          path: dist/ppt2pdf.exe
+          retention-days: 30
+
+      - name: Create GitHub Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ppt2pdf.exe
+          generate_release_notes: true
+          body: |
+            ## 설치 방법
+            아래 `ppt2pdf.exe` 를 다운로드 후 더블클릭하여 실행하세요.
+
+            **요구사항**: Windows 10 이상, Microsoft PowerPoint 설치 필수.
+
+            > Windows SmartScreen 경고가 뜨면
+            > "추가 정보 → 실행" 을 눌러주세요 (서명되지 않은 exe).

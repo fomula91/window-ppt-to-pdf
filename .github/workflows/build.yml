@@ -97,34 +97,41 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
+          # pwsh 7.4+ 는 기본으로 native 명령의 non-zero exit 를 터미널 에러로
+          # 승격한다. 여기서는 exit code 를 직접 판정하므로 그 동작을 끈다.
+          $PSNativeCommandUseErrorActionPreference = $false
           $ErrorActionPreference = "Stop"
 
-          # 1) 릴리스가 존재하면 삭제(실패 시 step 실패).
-          gh release view latest 1>$null 2>$null
-          $releaseExists = ($LASTEXITCODE -eq 0)
+          # 1) 릴리스 삭제 시도. "not found" 만 정상 경로, 나머지는 모두 실패.
+          $deleteOutput = (gh release delete latest --cleanup-tag --yes 2>&1 | Out-String).Trim()
+          $deleteCode = $LASTEXITCODE
 
-          if ($releaseExists) {
-            gh release delete latest --cleanup-tag --yes
-            if ($LASTEXITCODE -ne 0) {
-              Write-Error "Failed to delete existing 'latest' release (exit $LASTEXITCODE)."
-              exit 1
-            }
+          if ($deleteCode -eq 0) {
             Write-Host "Deleted stale 'latest' release and tag."
-          } else {
+          } elseif ($deleteOutput -match '(?i)not found|could not find|release does not exist') {
             Write-Host "No existing 'latest' release."
+          } else {
+            Write-Error "Failed to delete 'latest' release (exit $deleteCode): $deleteOutput"
+            exit 1
           }
 
           # 2) 릴리스는 없고 태그만 남은 희귀 상황 대비.
-          git ls-remote --exit-code --tags origin refs/tags/latest 1>$null 2>$null
-          $tagExists = ($LASTEXITCODE -eq 0)
+          # git ls-remote --exit-code: 매치 없으면 exit 2, 있으면 0, 기타 오류면 그 외.
+          git ls-remote --exit-code --tags origin refs/tags/latest 1>$null 2>&1
+          $tagCode = $LASTEXITCODE
 
-          if ($tagExists) {
+          if ($tagCode -eq 0) {
             git push origin :refs/tags/latest
             if ($LASTEXITCODE -ne 0) {
               Write-Error "Failed to delete stale 'latest' tag (exit $LASTEXITCODE)."
               exit 1
             }
             Write-Host "Deleted stale 'latest' tag."
+          } elseif ($tagCode -eq 2) {
+            Write-Host "No stale 'latest' tag."
+          } else {
+            Write-Error "Failed to query 'latest' tag (git ls-remote exit $tagCode)."
+            exit 1
           }
 
       # 1) 롤링 "latest" 프리릴리스 — 항상 한 개만 유지, 매 빌드마다 덮어씀.
